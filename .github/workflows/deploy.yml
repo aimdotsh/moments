@@ -1,9 +1,14 @@
 name: deploy Docker image
+
 on:
-  workflow_dispatch:
+  workflow_dispatch: 
+  schedule:
+    - cron: '0 0 * * *'
   push:
     tags:
       - "v*"
+
+
 jobs:
   build:
     runs-on: ubuntu-latest
