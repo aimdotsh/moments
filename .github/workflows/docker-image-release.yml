@@ -3,6 +3,7 @@ on:
   push:
     tags:
       - v*
+workflow_dispatch:  # ← 添加这一行！
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
