@@ -1,57 +1,61 @@
+# ========================================
 # 构建阶段
+# ========================================
 FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# 安装编译依赖（合并到一个 RUN 减少层数）
+# 安装编译依赖（用于 bcrypt 等原生模块）
 RUN apk add --no-cache \
     python3 \
     make \
     g++ \
     gcc \
     libc-dev \
-    linux-headers && \
-    rm -rf /var/cache/apk/*
+    linux-headers
 
-# 先复制依赖文件（利用 Docker 缓存）
+# 复制依赖文件
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# 设置 npm 配置（优化安装速度）
-RUN npm config set registry https://registry.npmmirror.com && \
-    npm install --legacy-peer-deps --no-audit --prefer-offline
+# 安装依赖
+RUN npm install
+
+# 复制源代码
+COPY . .
 
 # 生成 Prisma 客户端
 RUN npx prisma generate
 
-# 复制源代码（最后复制，避免代码改动导致前面的缓存失效）
-COPY . .
-
 # 构建项目
 RUN npm run build
 
+# 确保必要文件存在（避免后续复制失败）
+RUN touch /app/version
+
+# ========================================
 # 生产阶段
+# ========================================
 FROM node:22-alpine
 
 WORKDIR /app
 
-# 只安装运行时依赖
-RUN apk add --no-cache openssl libstdc++ && \
-    rm -rf /var/cache/apk/*
+# 安装运行时依赖
+RUN apk add --no-cache openssl libstdc++
 
-# 从构建阶段复制必要文件
+# 从构建阶段复制文件
 COPY --from=builder /app/.output /app/.output
 COPY --from=builder /app/prisma /app/prisma
 COPY --from=builder /app/start.sh /app/start.sh
 COPY --from=builder /app/config.json /app/config.json
-
-# 复制 version 文件（如果存在）
-COPY --from=builder /app/version /app/version 2>/dev/null || true
+COPY --from=builder /app/version /app/version
 
 # 初始化并安装 Prisma
 RUN npm init -y && \
-    npm install prisma@latest --save-dev && \
-    chmod +x /app/start.sh
+    npm install prisma@latest
+
+# 设置权限
+RUN chmod +x /app/start.sh
 
 # 创建数据目录
 RUN mkdir -p /app/data
