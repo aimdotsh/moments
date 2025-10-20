@@ -12,7 +12,9 @@ RUN apk add --no-cache \
     g++ \
     gcc \
     libc-dev \
-    linux-headers
+    linux-headers \
+    build-base \
+    openssl-dev
 
 # 复制依赖文件
 COPY package*.json ./
@@ -23,6 +25,11 @@ RUN npm install
 
 # 复制源代码
 COPY . .
+ENV PRISMA_CLI_BINARY_TARGETS="linux-musl"
+ENV PRISMA_FORCE_NAPI="true" 
+ENV PRISMA_ENGINE_PROTOCOL="json"
+# 强制使用兼容 Alpine 系统的 OpenSSL 版本
+ENV PRISMA_OPENSSL_VERSION="openssl-3.0.x"
 
 # 生成 Prisma 客户端
 RUN npx prisma generate
