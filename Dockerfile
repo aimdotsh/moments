@@ -1,51 +1,69 @@
-# Nuxt 3 builder
-FROM node:22.2.0-alpine as builder
-
-ARG VERSION
+# 构建阶段
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# 安装编译依赖（合并到一个 RUN 减少层数）
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    gcc \
+    libc-dev \
+    linux-headers && \
+    rm -rf /var/cache/apk/*
+
+# 先复制依赖文件（利用 Docker 缓存）
 COPY package*.json ./
+COPY prisma ./prisma/
 
-# 安装生产依赖
-RUN npm install 
+# 设置 npm 配置（优化安装速度）
+RUN npm config set registry https://registry.npmmirror.com && \
+    npm install --legacy-peer-deps --no-audit --prefer-offline
 
-# 复制整个项目
-COPY . .
-
-# 生成Prisma客户端
+# 生成 Prisma 客户端
 RUN npx prisma generate
 
-RUN echo $VERSION > /app/version
+# 复制源代码（最后复制，避免代码改动导致前面的缓存失效）
+COPY . .
 
-ENV NODE_ENV=production
-
-# 构建Nuxt应用
+# 构建项目
 RUN npm run build
 
-# Nuxt 3 production
-FROM node:22.2.0-alpine
+# 生产阶段
+FROM node:22-alpine
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV DATABASE_URL="file:/app/data/db.sqlite"
-ENV UPLOAD_DIR="/app/data/upload"
-ENV CONFIG_FILE="/app/data/config.json"
-ENV MOMENTS_VERSION=$VERSION
+# 只安装运行时依赖
+RUN apk add --no-cache openssl libstdc++ && \
+    rm -rf /var/cache/apk/*
 
-RUN mkdir -p /app/data/upload
-
+# 从构建阶段复制必要文件
 COPY --from=builder /app/.output /app/.output
 COPY --from=builder /app/prisma /app/prisma
 COPY --from=builder /app/start.sh /app/start.sh
-COPY --from=builder /app/version /app/version
-COPY --from=builder /app/config.json .
+COPY --from=builder /app/config.json /app/config.json
 
-RUN npm init -y
-RUN npm install -g prisma
-RUN chmod +x /app/start.sh
+# 复制 version 文件（如果存在）
+COPY --from=builder /app/version /app/version 2>/dev/null || true
+
+# 初始化并安装 Prisma
+RUN npm init -y && \
+    npm install prisma@latest --save-dev && \
+    chmod +x /app/start.sh
+
+# 创建数据目录
+RUN mkdir -p /app/data
+
+# 环境变量
+ENV NODE_ENV=production \
+    DATABASE_URL="file:/app/data/db.sqlite" \
+    UPLOAD_DIR="/app/data/upload" \
+    CONFIG_FILE="/app/data/config.json"
 
 EXPOSE 3000
 
-CMD /app/start.sh
+VOLUME ["/app/data"]
+
+CMD ["/app/start.sh"]
